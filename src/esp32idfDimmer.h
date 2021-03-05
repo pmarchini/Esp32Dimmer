@@ -1,3 +1,8 @@
+// RobotDyn porting of RBDDimmer library from Arduino framework to esp32-idf
+//
+// author : pmarchini
+// mail   : pietro.marchini94@gmail.com 
+
 #ifndef RBDDIMMER_H
 #define RBDDIMMER_H
 
