@@ -17,8 +17,20 @@
 #include "driver/timer.h"
 #include "freertos/task.h"
 #include "math.h"
+#include "esp_log.h"
+
+static const char *TAG = "Esp32idfDimmer";
 
 #define ALL_DIMMERS 50
+
+/*ISR debug defines*/
+#define ISR_DEBUG_ON 1
+#define ISR_DEBUG_OFF 0
+/*Activate/Deactivate isr debug*/
+#define DEBUG_ISR_DIMMER ISR_DEBUG_OFF
+#define DEBUG_ISR_TIMER ISR_DEBUG_ON
+
+
 
 static const uint8_t powerBuf[] = {
     100, 99, 98, 97, 96, 95, 94, 93, 92, 91,
@@ -31,6 +43,8 @@ static const uint8_t powerBuf[] = {
     30, 29, 28, 27, 26, 25, 24, 23, 22, 21,
     20, 19, 18, 17, 16, 15, 14, 13, 12, 11,
     10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+
+#define ESP_INTR_FLAG_DEFAULT 0
 
 typedef enum
 {
@@ -72,9 +86,8 @@ void port_init(dimmertyp *ptr);
 void config_timer(int freq);
 void ext_int_init(dimmertyp *ptr);
 
-void IRAM_ATTR isr_ext();
-void IRAM_ATTR onTimerISR();
-
+static void IRAM_ATTR isr_ext(void* arg);
+static void IRAM_ATTR onTimerISR(void* arg);
 
 
 #endif
