@@ -1,8 +1,15 @@
 // RobotDyn porting of RBDDimmer library from Arduino framework to esp32-idf
 //
 // author : pmarchini
-// mail   : pietro.marchini94@gmail.com 
+// mail   : pietro.marchini94@gmail.com
 
+
+/* TODO :
+ *
+ * Add all the static elements inside the dimmer struct
+ *
+ *
+ */
 
 #include "esp32idfDimmer.h"
 
@@ -11,6 +18,8 @@ volatile int current_dim = 0;
 int all_dim = 3;
 int rise_fall = true;
 char user_zero_cross = '0';
+int debug_signal_zc = 0;
+bool flagDebug = false;
 
 static int toggleCounter = 0;
 static int toggleReload = 25;
@@ -19,7 +28,9 @@ volatile int _steps = 0;
 
 #define STEPS _steps
 
+
 static dimmertyp *dimmer[ALL_DIMMERS];
+volatile bool firstSetup = false;
 volatile uint16_t dimPower[ALL_DIMMERS];
 volatile gpio_num_t dimOutPin[ALL_DIMMERS];
 volatile gpio_num_t dimZCPin[ALL_DIMMERS];
@@ -54,7 +65,6 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 	dimMode[current_dim - 1] = NORMAL_MODE;
 	togMin[current_dim - 1] = 0;
 	togMax[current_dim - 1] = 1;
-	gpio_set_direction(user_dimmer_pin, GPIO_MODE_OUTPUT);
 	//Return the pointer
 	return dimmer[current_dim - 1];
 }
@@ -70,9 +80,11 @@ uint32_t timer_divider = (TIMER_BASE_CLK / F);
 
 void config_timer(int ACfreq)
 {
+	ESP_LOGI(TAG, "Timer configuration - start");
 	/*System timer startup has been done*/
 	if (_initDone)
 	{
+		ESP_LOGW(TAG, "Timer configuration - timer already configured");
 		return;
 	}
 
@@ -106,6 +118,7 @@ void config_timer(int ACfreq)
 	timer_isr_register(TIMER_GROUP_0, TIMER_0, onTimerISR, NULL, ESP_INTR_FLAG_IRAM, NULL);
 	/* start timer */
 	timer_start(TIMER_GROUP_0, TIMER_0);
+	ESP_LOGI(TAG, "Timer configuration - completed");
 }
 
 /*Zero-crossing pin setting
@@ -114,17 +127,101 @@ void config_timer(int ACfreq)
  *set its interrupt*/
 void ext_int_init(dimmertyp *ptr)
 {
-	gpio_set_direction(dimZCPin[ptr->current_num], GPIO_MODE_INPUT);
-	gpio_set_pull_mode(dimZCPin[ptr->current_num], GPIO_PULLUP_ONLY);
-	gpio_set_intr_type(dimZCPin[ptr->current_num], GPIO_INTR_POSEDGE);
+	ESP_LOGI(TAG, "Setting ZCPin : %3d as input", dimZCPin[ptr->current_num]);
+	ESP_LOGI(TAG, "Checking for previous declaration of zc pin on the same gpio");
+	/*Zero crossing*/
+	bool alreadyInit = false;
+	for(int i = 0;i < ptr->current_num;i++){
+		if(dimZCPin[i] == dimZCPin[ptr->current_num]){
+			alreadyInit = true;
+		}
+	}
+	ESP_LOGI(TAG, "Already init = %3d",alreadyInit);
+	if(!alreadyInit)
+	{
+		gpio_set_direction(dimZCPin[ptr->current_num], GPIO_MODE_INPUT);
+		gpio_set_intr_type(dimZCPin[ptr->current_num], GPIO_INTR_NEGEDGE);
+		gpio_intr_enable(dimZCPin[ptr->current_num]);
+		gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+		gpio_isr_handler_add(dimZCPin[ptr->current_num],isr_ext,(void*)dimZCPin[ptr->current_num]);
+	}
+	ESP_LOGI(TAG, "Zero Cross interrupt configuration - completed");
+	/*TRIAC command - configuration*/
+	ESP_LOGI(TAG, "Triac command configuration");
+	gpio_set_direction(dimOutPin[ptr->current_num], GPIO_MODE_OUTPUT);
+	ESP_LOGI(TAG, "Triac command configuration - completed");
 }
+
+/*ISR debug region*/
+#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+
+static xQueueHandle gpio_evt_queue = NULL;
+
+static void gpio_isr_debug(void* arg)
+{
+    uint32_t io_num;
+    for(;;) {
+        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+        }
+    }
+}
+
+#endif
+
+
+/*ISR timer debug region*/
+#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
+
+static xQueueHandle timer_event_queue = NULL;
+
+static void timer_isr_debug(void* arg)
+{
+    uint32_t io_num;
+    for(;;) {
+        if(xQueueReceive(timer_event_queue, NULL, portMAX_DELAY)) {
+            printf("Timer interrupt event");
+        }
+    }
+}
+
+#endif
+
+
+
 
 void begin(dimmertyp *ptr, DIMMER_MODE_typedef DIMMER_MODE, ON_OFF_typedef ON_OFF, int FREQ)
 {
+	ESP_LOGI(TAG, "Dimmer - begin");
 	dimMode[ptr->current_num] = DIMMER_MODE;
 	dimState[ptr->current_num] = ON_OFF;
+
+	#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+	if(!_initDone)
+	{
+			//create a queue to handle gpio event from isr
+    		gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    		//start gpio task
+    		xTaskCreate(gpio_isr_debug, "gpio_isr_debug", 2048, NULL, 10, NULL);
+	}
+	#endif
+
+	#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
+			if(!_initDone)
+	{
+			//create a queue to handle gpio event from isr
+    		timer_event_queue = xQueueCreate(10, sizeof(uint32_t));
+    		//start gpio task
+    		xTaskCreate(timer_isr_debug, "timer_isr_debug", 2048, NULL, 10, NULL);
+	}
+	#endif
+
 	config_timer(FREQ);
 	ext_int_init(ptr);
+
+	//init completed
+	_initDone = true;
+	ESP_LOGI(TAG, "Dimmer begin - completed");
 }
 
 void setPower(dimmertyp *ptr, int power)
@@ -197,8 +294,16 @@ void toggleSettings(dimmertyp *ptr, int minValue, int maxValue)
 	toggleReload = 50;
 }
 
-void IRAM_ATTR isr_ext()
+
+
+static void IRAM_ATTR isr_ext(void* arg)
 {
+
+	#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+		uint32_t gpio_num = (uint32_t) arg;
+    	xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+	#endif
+
 	for (int i = 0; i < current_dim; i++)
 		if (dimState[i] == ON)
 		{
@@ -208,8 +313,12 @@ void IRAM_ATTR isr_ext()
 
 static int k;
 /* Execution on timer event */
-void IRAM_ATTR onTimerISR()
+static void IRAM_ATTR onTimerISR(void* arg)
 {
+
+	#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
+    	xQueueSendFromISR(timer_event_queue, NULL, NULL);
+	#endif
 
 	toggleCounter++;
 	for (k = 0; k < current_dim; k++)
@@ -220,7 +329,7 @@ void IRAM_ATTR onTimerISR()
 
 			if (dimMode[k] == TOGGLE_MODE)
 			{
-			/*****
+				/*****
 			 * TOGGLE DIMMING MODE
 			 *****/
 				if (dimPulseBegin[k] >= togMax[k])
@@ -247,7 +356,7 @@ void IRAM_ATTR onTimerISR()
 			 *****/
 			if (dimCounter[k] >= dimPulseBegin[k])
 			{
-				 gpio_set_level(dimOutPin[k], 1);
+				gpio_set_level(dimOutPin[k], 1);
 			}
 
 			if (dimCounter[k] >= (dimPulseBegin[k] + pulseWidth))
