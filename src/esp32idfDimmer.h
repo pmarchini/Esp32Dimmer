@@ -19,8 +19,6 @@
 #include "math.h"
 #include "esp_log.h"
 
-static const char *TAG = "Esp32idfDimmer";
-
 #define ALL_DIMMERS 50
 
 /*ISR debug defines*/

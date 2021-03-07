@@ -13,6 +13,8 @@
 
 #include "esp32idfDimmer.h"
 
+static const char *TAG = "Esp32idfDimmer";
+
 int pulseWidth = 2;
 volatile int current_dim = 0;
 int all_dim = 3;
@@ -25,8 +27,6 @@ static int toggleCounter = 0;
 static int toggleReload = 25;
 volatile bool _initDone = false;
 volatile int _steps = 0;
-
-#define STEPS _steps
 
 
 static dimmertyp *dimmer[ALL_DIMMERS];
