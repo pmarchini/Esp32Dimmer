@@ -1,4 +1,4 @@
-// RobotDyn porting of RBDDimmer library from Arduino framework to esp32-idf
+// RobotDyn porting of RBDDimmer library from Arduino framework to esp-idf
 //
 // author : pmarchini
 // mail   : pietro.marchini94@gmail.com
@@ -6,14 +6,14 @@
 
 /* TODO :
  *
- * Add all the static elements inside the dimmer struct
+ * 
  *
  *
  */
 
 #include "esp32idfDimmer.h"
 
-int pulseWidth = 1;
+int pulseWidth = 2;
 volatile int current_dim = 0;
 int all_dim = 3;
 int rise_fall = true;
@@ -69,14 +69,12 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 	return dimmer[current_dim - 1];
 }
 
-/*TODO -> fix correct values with details and a small guide on value set*/
-#define F 1600
-#define BASE_SPEED 320
 
-const int base_speed = 320;
-int steps = 0;
 
-uint32_t timer_divider = (TIMER_BASE_CLK / F);
+#define TIMER_DIVIDER         80  //  Hardware timer clock divider
+#define TIMER_SCALE           (TIMER_BASE_CLK / TIMER_DIVIDER)  // convert counter value to seconds
+#define TIMER_INTERVAL0_SEC   (0.0001) 
+
 
 void config_timer(int ACfreq)
 {
@@ -88,17 +86,6 @@ void config_timer(int ACfreq)
 		return;
 	}
 
-	STEPS = 0;
-
-	if (ACfreq > 10 && ACfreq <= 100)
-	{
-		STEPS = (1 / ACfreq) * pow(10, 6);
-	}
-	else
-	{
-		STEPS = 100;
-	}
-
 	memset(&m_timer_config, 0, sizeof(m_timer_config));
 
 	/* Prepare configuration */
@@ -108,16 +95,22 @@ void config_timer(int ACfreq)
 			.counter_en = TIMER_PAUSE,
 			.counter_dir = TIMER_COUNT_UP,
 			.auto_reload = TIMER_AUTORELOAD_EN,
-			.divider = 250,
+			.divider = TIMER_DIVIDER,
 		};
 
+	/*self regulation 50/60 Hz*/
+	double m_calculated_interval = (1 / (ACfreq*2)) / 100;
+
+	ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
 	/* Configure the alarm value and the interrupt on alarm. */
 	timer_init(TIMER_GROUP_0, TIMER_0, &m_timer_config);
-	timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, STEPS);
+	timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, TIMER_SCALE * m_calculated_interval);
 	timer_enable_intr(TIMER_GROUP_0, TIMER_0);
-	timer_isr_register(TIMER_GROUP_0, TIMER_0, onTimerISR, NULL, ESP_INTR_FLAG_IRAM, NULL);
+	timer_isr_register(TIMER_GROUP_0, TIMER_0, onTimerISR, (void*)TIMER_0, ESP_INTR_FLAG_IRAM, NULL);
 	/* start timer */
+	ESP_LOGI(TAG, "Timer configuration - start timer");
 	timer_start(TIMER_GROUP_0, TIMER_0);
+	timer_set_alarm(TIMER_GROUP_0,TIMER_0,TIMER_ALARM_EN);
 	ESP_LOGI(TAG, "Timer configuration - completed");
 }
 
@@ -128,7 +121,7 @@ void config_timer(int ACfreq)
 void ext_int_init(dimmertyp *ptr)
 {
 	ESP_LOGI(TAG, "Setting ZCPin : %3d as input", dimZCPin[ptr->current_num]);
-	ESP_LOGI(TAG, "Checking for previous declaration of zc pin on the same gpio");
+	ESP_LOGI(TAG, "Checking for previous declaration of zc input on the same gpio");
 	/*Zero crossing*/
 	bool alreadyInit = false;
 	for(int i = 0;i < ptr->current_num;i++){
@@ -179,8 +172,8 @@ static void timer_isr_debug(void* arg)
 {
     uint32_t io_num;
     for(;;) {
-        if(xQueueReceive(timer_event_queue, NULL, portMAX_DELAY)) {
-            printf("Timer interrupt event");
+        if(xQueueReceive(timer_event_queue, &io_num, portMAX_DELAY)) {
+            printf("Timer interrupt event , counter = %5d \n",io_num);
         }
     }
 }
@@ -207,9 +200,9 @@ void begin(dimmertyp *ptr, DIMMER_MODE_typedef DIMMER_MODE, ON_OFF_typedef ON_OF
 	#endif
 
 	#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
-			if(!_initDone)
+	if(!_initDone)
 	{
-			//create a queue to handle gpio event from isr
+			//create a queue to handle timer event
     		timer_event_queue = xQueueCreate(10, sizeof(uint32_t));
     		//start gpio task
     		xTaskCreate(timer_isr_debug, "timer_isr_debug", 2048, NULL, 10, NULL);
@@ -312,12 +305,21 @@ static void IRAM_ATTR isr_ext(void* arg)
 }
 
 static int k;
+#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
+	static int counter = 0;
+#endif
 /* Execution on timer event */
-static void IRAM_ATTR onTimerISR(void* arg)
+static void IRAM_ATTR onTimerISR(void* para)
 {
-
+	/*Block needed to handle timer ISR*/
+	timer_spinlock_take(TIMER_GROUP_0);
+	timer_group_clr_intr_status_in_isr(TIMER_GROUP_0, TIMER_0);
+	/*Give back spinlock at the end of the method*/
+	/**********************************/
 	#if DEBUG_ISR_TIMER == ISR_DEBUG_ON
-    	xQueueSendFromISR(timer_event_queue, NULL, NULL);
+		counter++;
+		uint32_t info = (uint32_t) counter;
+		xQueueSendFromISR(timer_event_queue, &info, NULL);
 	#endif
 
 	toggleCounter++;
@@ -369,4 +371,10 @@ static void IRAM_ATTR onTimerISR(void* arg)
 	}
 	if (toggleCounter >= toggleReload)
 		toggleCounter = 1;
+
+
+	/* After the alarm has been triggered
+       we need enable it again, so it is triggered the next time */
+    timer_group_enable_alarm_in_isr(TIMER_GROUP_0, TIMER_0);
+	timer_spinlock_give(TIMER_GROUP_0);
 }

@@ -1,4 +1,4 @@
-// RobotDyn porting of RBDDimmer library from Arduino framework to esp32-idf
+// RobotDyn porting of RBDDimmer library from Arduino framework to esp-idf
 //
 // author : pmarchini
 // mail   : pietro.marchini94@gmail.com 
@@ -28,7 +28,8 @@ static const char *TAG = "Esp32idfDimmer";
 #define ISR_DEBUG_OFF 0
 /*Activate/Deactivate isr debug*/
 #define DEBUG_ISR_DIMMER ISR_DEBUG_OFF
-#define DEBUG_ISR_TIMER ISR_DEBUG_ON
+/*If timer is too fast can lead to core 0 panic*/
+#define DEBUG_ISR_TIMER ISR_DEBUG_OFF
 
 
 
