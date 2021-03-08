@@ -73,8 +73,6 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 
 #define TIMER_DIVIDER         80  //  Hardware timer clock divider
 #define TIMER_SCALE           (TIMER_BASE_CLK / TIMER_DIVIDER)  // convert counter value to seconds
-#define TIMER_INTERVAL0_SEC   (0.0001) 
-
 
 void config_timer(int ACfreq)
 {
@@ -99,8 +97,8 @@ void config_timer(int ACfreq)
 		};
 
 	/*self regulation 50/60 Hz*/
-	double m_calculated_interval = (1 / (ACfreq*2)) / 100;
-
+	double m_calculated_interval = (1 / (double)(ACfreq*2)) / 100;
+	ESP_LOGI(TAG, "Interval between wave calculated for frequency : %3dHz = %5f",ACfreq,m_calculated_interval);
 	ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
 	/* Configure the alarm value and the interrupt on alarm. */
 	timer_init(TIMER_GROUP_0, TIMER_0, &m_timer_config);
