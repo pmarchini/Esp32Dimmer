@@ -5,7 +5,7 @@ Esp32-idf zerocrossing TRIAC dimmer library
 
 ### Zero-crossing detector
 
-![image](https://user-images.githubusercontent.com/49943249/194775281-3f8dd0a0-c1ed-43fb-b4e0-46ddd4983775.png)
+![image](https://user-images.githubusercontent.com/49943249/194775323-f39d7d93-49cd-4882-aff1-6535ebe1c8b8.png)
 
 ### Triac command 
 
