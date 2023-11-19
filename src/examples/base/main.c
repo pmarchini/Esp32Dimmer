@@ -1,4 +1,4 @@
-#include "esp32idfDimmer.h"
+#include "esp32-triac-dimmer-driver.h"
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -34,10 +34,10 @@ void app_main()
     while (1)
     {
         // change the output power
-        getPower(ptr_dimmer) < 60 ? setPower(ptr_dimmer, (getPower(ptr_dimmer) + 5)) : setPower(ptr_dimmer, 1);
+        getPower(ptr_dimmer) < 50 ? setPower(ptr_dimmer, (getPower(ptr_dimmer) + 1)) : setPower(ptr_dimmer, 20);
         setPower(ptr_dimmer_2, getPower(ptr_dimmer));
         // wait
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 

@@ -9,7 +9,7 @@
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "driver/periph_ctrl.h"
-#include "driver/timer.h"
+#include "driver/gptimer.h"
 #include "freertos/task.h"
 #include "math.h"
 #include "esp_log.h"

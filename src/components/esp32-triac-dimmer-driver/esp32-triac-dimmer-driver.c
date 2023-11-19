@@ -1,5 +1,5 @@
 
-#include "esp32idfDimmer.h"
+#include "esp32-triac-dimmer-driver.h"
 
 static const char *TAG = "Esp32idfDimmer";
 
@@ -31,7 +31,12 @@ volatile uint16_t togMin[ALL_DIMMERS];
 volatile bool togDir[ALL_DIMMERS];
 
 /* timer configurations */
-timer_config_t m_timer_config;
+gptimer_config_t m_timer_config;
+gptimer_handle_t gptimer = NULL;
+typedef struct {
+    uint64_t event_count;
+} example_queue_element_t;
+
 
 dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 {
@@ -56,8 +61,35 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 	return dimmer[current_dim - 1];
 }
 
-#define TIMER_DIVIDER 80							 //  Hardware timer clock divider
-#define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER) // convert counter value to seconds
+#define TIMER_BASE_CLK 1 * 1000 * 1000,              // 1MHz, 1 tick = 1us
+
+/**
+ * @brief Configure the timer alarm
+ */
+void config_alarm(gptimer_handle_t *timer, int ACfreq) 
+{   
+    /*self regulation 50/60 Hz*/
+	double m_calculated_interval = (1 / (double)(ACfreq * 2)) / 100;
+    ESP_LOGI(TAG, "Interval between wave calculated for frequency : %3dHz = %5f", ACfreq, m_calculated_interval);
+
+    ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
+    ESP_LOGI(TAG, "Timer configuration - configure alarm");
+    gptimer_alarm_config_t alarm_config = {
+    .reload_count = 0, // counter will reload with 0 on alarm event
+    .alarm_count = (1000000 * m_calculated_interval),
+    .flags.auto_reload_on_alarm = true, // enable auto-reload
+    };
+    ESP_LOGI(TAG, "Timer configuration - set alarm action");
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config));
+
+    gptimer_event_callbacks_t cbs = {
+    .on_alarm = onTimerISR, // register user callback
+    };
+    ESP_LOGI(TAG, "Timer configuration - register event callbacks");
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &cbs, NULL));
+
+    ESP_LOGI(TAG, "Timer configuration - configuration completed");
+}
 
 void config_timer(int ACfreq)
 {
@@ -72,28 +104,22 @@ void config_timer(int ACfreq)
 	memset(&m_timer_config, 0, sizeof(m_timer_config));
 
 	/* Prepare configuration */
-	timer_config_t m_timer_config =
-		{
-			.alarm_en = TIMER_ALARM_DIS,
-			.counter_en = TIMER_PAUSE,
-			.counter_dir = TIMER_COUNT_UP,
-			.auto_reload = TIMER_AUTORELOAD_EN,
-			.divider = TIMER_DIVIDER,
-		};
+    gptimer_config_t m_timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = TIMER_BASE_CLK
+    };
 
-	/*self regulation 50/60 Hz*/
-	double m_calculated_interval = (1 / (double)(ACfreq * 2)) / 100;
-	ESP_LOGI(TAG, "Interval between wave calculated for frequency : %3dHz = %5f", ACfreq, m_calculated_interval);
 	ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
 	/* Configure the alarm value and the interrupt on alarm. */
-	timer_init(TIMER_GROUP_0, TIMER_0, &m_timer_config);
-	timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, TIMER_SCALE * m_calculated_interval);
-	timer_enable_intr(TIMER_GROUP_0, TIMER_0);
-	timer_isr_register(TIMER_GROUP_0, TIMER_0, onTimerISR, (void *)TIMER_0, ESP_INTR_FLAG_IRAM, NULL);
+	ESP_ERROR_CHECK(gptimer_new_timer(&m_timer_config, &gptimer));
+
+    /* Configure the alarm value and the interrupt on alarm. */
+    config_alarm(gptimer, ACfreq);
 	/* start timer */
 	ESP_LOGI(TAG, "Timer configuration - start timer");
-	timer_start(TIMER_GROUP_0, TIMER_0);
-	timer_set_alarm(TIMER_GROUP_0, TIMER_0, TIMER_ALARM_EN);
+    ESP_ERROR_CHECK(gptimer_enable(gptimer));
+    ESP_ERROR_CHECK(gptimer_start(gptimer));
 	ESP_LOGI(TAG, "Timer configuration - completed");
 }
 
@@ -132,9 +158,9 @@ void ext_int_init(dimmertyp *ptr)
 }
 
 /*ISR debug region*/
-#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+#if DEBUG_ZERO_CROSS_SIGNAL == ISR_DEBUG_ON
 
-static xQueueHandle gpio_zero_cross_evt_queue = NULL;
+static QueueHandle_t gpio_zero_cross_evt_queue = NULL;
 
 static void gpio_isr_zerocross_debug(void *arg)
 {
@@ -153,7 +179,7 @@ static void gpio_isr_zerocross_debug(void *arg)
 /*ISR timer debug region*/
 #if DEBUG_ISR_TIMER == ISR_DEBUG_ON
 
-static xQueueHandle timer_event_queue = NULL;
+static QueueHandle_t timer_event_queue = NULL;
 
 static void timer_isr_debug(void *arg)
 {
@@ -162,7 +188,7 @@ static void timer_isr_debug(void *arg)
 	{
 		if (xQueueReceive(timer_event_queue, &io_num, portMAX_DELAY))
 		{
-			printf("Timer interrupt event , counter = %5d \n", io_num);
+			printf("Timer interrupt event , counter = %5lu \n", io_num);
 		}
 	}
 }
@@ -175,7 +201,7 @@ void begin(dimmertyp *ptr, DIMMER_MODE_typedef DIMMER_MODE, ON_OFF_typedef ON_OF
 	dimMode[ptr->current_num] = DIMMER_MODE;
 	dimState[ptr->current_num] = ON_OFF;
 
-#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+#if DEBUG_ZERO_CROSS_SIGNAL == ISR_DEBUG_ON
 	if (!_initDone)
 	{
 		// create a queue to handle gpio event from isr
@@ -276,7 +302,7 @@ void toggleSettings(dimmertyp *ptr, int minValue, int maxValue)
 static void IRAM_ATTR isr_ext(void *arg)
 {
 
-#if DEBUG_ISR_DIMMER == ISR_DEBUG_ON
+#if DEBUG_ZERO_CROSS_SIGNAL == ISR_DEBUG_ON
 	uint32_t gpio_num = (uint32_t)arg;
 	xQueueSendFromISR(gpio_zero_cross_evt_queue, &gpio_num, NULL);
 #endif
@@ -295,10 +321,6 @@ static int counter = 0;
 /* Execution on timer event */
 static void IRAM_ATTR onTimerISR(void *para)
 {
-	/*Block needed to handle timer ISR*/
-	timer_spinlock_take(TIMER_GROUP_0);
-	timer_group_clr_intr_status_in_isr(TIMER_GROUP_0, TIMER_0);
-/*Give back spinlock at the end of the method*/
 /**********************************/
 #if DEBUG_ISR_TIMER == ISR_DEBUG_ON
 	counter++;
@@ -355,9 +377,4 @@ static void IRAM_ATTR onTimerISR(void *para)
 	}
 	if (toggleCounter >= toggleReload)
 		toggleCounter = 1;
-
-	/* After the alarm has been triggered
-	   we need enable it again, so it is triggered the next time */
-	timer_group_enable_alarm_in_isr(TIMER_GROUP_0, TIMER_0);
-	timer_spinlock_give(TIMER_GROUP_0);
 }

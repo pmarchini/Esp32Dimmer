@@ -1,13 +1,15 @@
-# ESP32IDFDimmer
+# ESP32 Triac Dimmer Driver
 
-This library provides an API to control dimmer devices using the ESP32IDF. It supports both toggle and normal modes, and allows you to set the power levels of the dimmer. 
+This library provides an API to control dimmer devices using ESP-IDF 5.x.  
+**For ESP-IDF 4.x projects, please use the v1.0.0 release of this library.**
+It supports both toggle and normal modes, and allows you to set the power levels of the dimmer.
 
 ### Prerequisites
-- ESP32 board with ESP-IDF v4.1 or higher
-- A dimmable AC load 
+- ESP32 board with ESP-IDF v5.0 or higher
+- A dimmable AC load
 
 ### Installation
-Clone the project from the repository and add the library to your project. 
+Clone the component into your project components directory. 
 
 ### Usage
 1. Include the library header in your program 
@@ -60,6 +62,14 @@ The library provides the following API methods:
 ### Triac command 
 
 ![image](https://user-images.githubusercontent.com/49943249/194775053-0badd3f8-0c23-4a86-8843-abe2f994f5b3.png)
+
+## Migrated to ESP-IDF 5.x and Component
+This library has been migrated to ESP-IDF 5.x and is no longer compatible with previous versions.  
+It has also been transformed into an ESP-IDF component for easier integration.
+
+To use the basic example, add the component to your project's components directory and replace the main file with the code from examples/base/main.c.
+
+If you are using the library in a project that is not using ESP-IDF 5.x, you can still use the old version of the library (v1.0.0) which is compatible with ESP-IDF 4.x.
 
 ## Contributing 
 
