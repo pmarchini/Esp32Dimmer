@@ -14,7 +14,7 @@ Clone the component into your project components directory.
 ### Usage
 1. Include the library header in your program 
 ```
-#include "esp32idfDimmer.h"
+#include "esp32-triac-dimmer-driver.h" 
 ```
 2. Instantiate the dimmers. 
 ```
