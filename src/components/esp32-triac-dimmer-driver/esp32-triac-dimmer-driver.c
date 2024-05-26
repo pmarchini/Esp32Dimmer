@@ -1,4 +1,3 @@
-
 #include "esp32-triac-dimmer-driver.h"
 
 static const char *TAG = "Esp32idfDimmer";
