@@ -34,6 +34,13 @@ The tests are organized using the ESP-IDF Unity testing framework and cover the 
 6. **Multiple Dimmer Tests**
    - `test_multiple_dimmers_independent`: Verifies multiple dimmers operate independently
 
+7. **GPIO and Timer ISR Tests**
+   - `test_gpio_output_timing_high`: Verifies GPIO output pin timing after zero-crossing
+   - `test_gpio_output_pulse_width`: Tests the pulse width timing on GPIO output
+   - `test_gpio_output_zero_crossing_response`: Validates dimmer response to zero-crossing interrupts
+   - `test_multiple_dimmers_gpio_independence`: Tests that multiple dimmers control GPIO pins independently
+   - `test_timer_isr_respects_state_changes`: Verifies timer ISR respects dimmer state changes (ON/OFF)
+
 ## Running the Tests
 
 ### Prerequisites
@@ -99,7 +106,7 @@ PASS
 All tests completed!
 ========================================
 
-16 Tests 0 Failures 0 Ignored
+19 Tests 0 Failures 0 Ignored
 OK
 ```
 
@@ -114,6 +121,10 @@ The unit tests cover:
 - ✅ Toggle settings configuration
 - ✅ Multiple independent dimmers
 - ✅ State-dependent behavior
+- ✅ GPIO output timing and pulse width
+- ✅ Timer ISR behavior with zero-crossing events
+- ✅ GPIO pin state changes based on power settings
+- ✅ Multi-dimmer GPIO independence
 
 ## Notes for Future Refactoring
 
@@ -125,15 +136,15 @@ These unit tests are designed to:
 
 3. **Catch regressions**: Running these tests after changes helps catch any unintended behavior changes.
 
-4. **Hardware independence**: These tests focus on the software logic and can run without actual dimmer hardware connected. They test the API layer and state management.
+4. **Hardware independence**: These tests include both API-level tests (hardware-independent) and GPIO/timer tests that verify the dimmer output behavior. The GPIO/timer tests simulate zero-crossing events and verify output pin timing, providing confidence in the core dimmer logic.
 
 ## Limitations
 
-- These tests do not verify actual hardware functionality (zero-crossing detection, TRIAC firing)
-- ISR behavior is not directly tested (requires hardware/simulation)
-- Timing-critical code paths are not fully tested without hardware
+- GPIO timing tests verify the mechanism is working but cannot precisely measure microsecond-level timing without specialized hardware
+- Actual TRIAC firing with AC loads requires hardware validation
+- Full zero-crossing detector integration requires real AC signal input
 
-For hardware integration testing, additional tests would be needed with actual hardware or simulation.
+For complete hardware integration testing, additional tests with actual hardware, oscilloscope verification, and AC loads are recommended.
 
 ## Adding New Tests
 

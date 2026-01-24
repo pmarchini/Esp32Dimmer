@@ -6,7 +6,7 @@ This guide provides instructions for running and extending the unit tests for th
 
 ## Test Coverage Summary
 
-The unit test suite covers 16 test cases across the following categories:
+The unit test suite covers 19 test cases across the following categories:
 
 ### 1. Dimmer Creation (2 tests)
 - Creating a single dimmer instance
@@ -34,9 +34,15 @@ The unit test suite covers 16 test cases across the following categories:
 ### 6. Multiple Dimmers (1 test)
 - Independent operation of multiple dimmers
 
-### 7. Integration (2 tests)
+### 7. GPIO and Timer ISR (5 tests)
+- GPIO output timing after zero-crossing events
+- Pulse width timing on GPIO output
+- Dimmer response to zero-crossing interrupts
+- Multiple dimmers controlling GPIO pins independently
+- Timer ISR respecting dimmer state changes (ON/OFF)
+
+### 8. Integration (1 test)
 - State changes affecting power reporting
-- Complete workflow validation
 
 ## Prerequisites
 
