@@ -11,9 +11,6 @@
 #define TEST_TRIAC_GPIO_2 GPIO_NUM_23
 #define TEST_ZC_GPIO GPIO_NUM_21
 
-// External variable to reset dimmer count for testing
-extern int current_dim;
-
 void setUp(void)
 {
     // This is run before each test
