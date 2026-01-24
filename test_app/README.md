@@ -35,11 +35,11 @@ The tests are organized using the ESP-IDF Unity testing framework and cover the 
    - `test_multiple_dimmers_independent`: Verifies multiple dimmers operate independently
 
 7. **GPIO and Timer ISR Tests**
-   - `test_gpio_output_timing_high`: Verifies GPIO output pin timing after zero-crossing
-   - `test_gpio_output_pulse_width`: Tests the pulse width timing on GPIO output
-   - `test_gpio_output_zero_crossing_response`: Validates dimmer response to zero-crossing interrupts
-   - `test_multiple_dimmers_gpio_independence`: Tests that multiple dimmers control GPIO pins independently
-   - `test_timer_isr_respects_state_changes`: Verifies timer ISR respects dimmer state changes (ON/OFF)
+   - `test_gpio_output_timing_high`: Verifies GPIO output pin goes HIGH after zero-crossing trigger (tests with power=99 for immediate response)
+   - `test_gpio_output_pulse_width`: Tests the pulse completes and pin returns to LOW after full cycle
+   - `test_gpio_output_zero_crossing_response`: Validates dimmer triggers output HIGH in response to zero-crossing events
+   - `test_multiple_dimmers_gpio_independence`: Tests that ON dimmer triggers output while OFF dimmer remains LOW
+   - `test_timer_isr_respects_state_changes`: Verifies timer ISR keeps pin LOW when OFF and triggers HIGH when ON
 
 ## Running the Tests
 
