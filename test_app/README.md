@@ -41,6 +41,20 @@ The tests are organized using the ESP-IDF Unity testing framework and cover the 
 - ESP-IDF v5.0 or higher installed
 - ESP32 development board (tests can run without actual hardware connected)
 
+### Validate Your Setup
+
+Before running tests, you can validate your environment:
+
+```bash
+./validate_setup.sh
+```
+
+This will check:
+- Python and ESP-IDF installation
+- Required files and directories
+- Serial port availability
+- CMake installation
+
 ### Build and Flash
 
 1. Navigate to the test_app directory:
