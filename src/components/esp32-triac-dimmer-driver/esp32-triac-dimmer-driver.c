@@ -82,27 +82,6 @@ static void init_event_queue(void)
 }
 
 /**
- * @brief Find the next event in queue (earliest timestamp)
- * @return Index of next event, or -1 if queue is empty
- */
-static int find_next_event_index(void)
-{
-	int next_idx = -1;
-	uint64_t earliest_time = UINT64_MAX;
-	
-	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
-	{
-		if (event_queue[i].active && event_queue[i].timestamp < earliest_time)
-		{
-			earliest_time = event_queue[i].timestamp;
-			next_idx = i;
-		}
-	}
-	
-	return next_idx;
-}
-
-/**
  * @brief Schedule a timer event
  * @param timestamp Absolute timestamp when event should occur
  * @param dimmer_id Which dimmer this event affects
@@ -479,8 +458,9 @@ static void IRAM_ATTR onTimerISR(void *para)
 				// Fire the triac
 				gpio_set_level(dimOutPin[event->dimmer_id], 1);
 				
-				// Schedule pulse end event using pre-calculated pulse width
-				uint64_t pulse_end_time = current_time + pulse_width_ticks;
+				// Schedule pulse end event based on the event's original fire time
+				// to maintain precise pulse width
+				uint64_t pulse_end_time = event->timestamp + pulse_width_ticks;
 				bool scheduled = schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
 				
 				// If scheduling failed, turn off triac immediately to prevent it staying on
