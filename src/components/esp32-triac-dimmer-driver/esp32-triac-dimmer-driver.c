@@ -33,7 +33,7 @@ typedef struct {
 } example_queue_element_t;
 
 /* Event queue for single-fire timer implementation */
-static timer_event_t event_queue[MAX_TIMER_EVENTS];
+static volatile timer_event_t event_queue[MAX_TIMER_EVENTS];
 static volatile int event_queue_size = 0;
 static uint64_t alarm_interval_ticks = 0;     // Calculated based on AC frequency (set by config_alarm)
 static uint64_t pulse_width_ticks = 0;        // Pre-calculated pulse width in ticks (set by config_alarm)
@@ -79,7 +79,7 @@ static void init_event_queue(void)
  * @brief Find the next event in queue (earliest timestamp)
  * @return Index of next event, or -1 if queue is empty
  */
-static int find_next_event_index(void)
+static int IRAM_ATTR find_next_event_index(void)
 {
 	int next_idx = -1;
 	uint64_t earliest_time = UINT64_MAX;
@@ -103,19 +103,19 @@ static int find_next_event_index(void)
  * @param event_type Type of event (fire or end pulse)
  * @return true if event was scheduled, false if queue is full or invalid input
  */
-static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_event_type_t event_type)
+static bool IRAM_ATTR schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_event_type_t event_type)
 {
 	// Validate dimmer_id to prevent array bounds violations
 	if (dimmer_id >= ALL_DIMMERS)
 	{
-		ESP_LOGE(TAG, "Invalid dimmer_id: %d (max: %d)", dimmer_id, ALL_DIMMERS - 1);
+		// Cannot use ESP_LOGE in ISR - silently fail
 		return false;
 	}
 	
 	// Validate event_type
 	if (event_type != EVENT_FIRE_TRIAC && event_type != EVENT_END_PULSE)
 	{
-		ESP_LOGE(TAG, "Invalid event_type: %d", event_type);
+		// Cannot use ESP_LOGE in ISR - silently fail
 		return false;
 	}
 	
@@ -133,8 +133,7 @@ static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_ev
 		}
 	}
 	
-	// Queue is full
-	ESP_LOGE(TAG, "Event queue full!");
+	// Queue is full - cannot use ESP_LOGE in ISR
 	return false;
 }
 
@@ -142,7 +141,7 @@ static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_ev
  * @brief Remove an event from the queue
  * @param index Index of event to remove
  */
-static void remove_event(int index)
+static void IRAM_ATTR remove_event(int index)
 {
 	if (index >= 0 && index < MAX_TIMER_EVENTS && event_queue[index].active)
 	{
@@ -518,10 +517,10 @@ static void IRAM_ATTR onTimerISR(void *para)
 				
 				// If scheduling failed, turn off triac immediately
 				// to prevent it staying on
+				// Cannot use ESP_LOGE in ISR - silently handle error
 				if (!scheduled)
 				{
 					gpio_set_level(dimOutPin[event->dimmer_id], 0);
-					ESP_LOGE(TAG, "Failed to schedule pulse end for dimmer %d", event->dimmer_id);
 				}
 			}
 			else if (event->event_type == EVENT_END_PULSE)
@@ -530,10 +529,7 @@ static void IRAM_ATTR onTimerISR(void *para)
 				gpio_set_level(dimOutPin[event->dimmer_id], 0);
 			}
 		}
-		else
-		{
-			ESP_LOGE(TAG, "Invalid dimmer_id in event: %d", event->dimmer_id);
-		}
+		// Silently ignore invalid dimmer_id - cannot use ESP_LOGE in ISR
 		
 		// Remove processed event
 		remove_event(i);
