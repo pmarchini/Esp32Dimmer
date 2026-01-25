@@ -4,6 +4,11 @@ This library provides an API to control dimmer devices using ESP-IDF 5.x.
 **For ESP-IDF 4.x projects, please use the v1.0.0 release of this library.**
 It supports both toggle and normal modes, and allows you to set the power levels of the dimmer.
 
+## 📚 Documentation
+
+For detailed technical documentation about the triac cycle, zero crossing detection, and delay calculations, please see:
+- **[Triac Cycle Documentation](TRIAC_CYCLE.md)** - Comprehensive guide with timing diagrams and Mermaid graphs
+
 ### Prerequisites
 - ESP32 board with ESP-IDF v5.0 or higher
 - A dimmable AC load
