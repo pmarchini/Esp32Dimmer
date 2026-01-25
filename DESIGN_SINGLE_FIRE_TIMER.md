@@ -467,38 +467,51 @@ The single-fire timer implementation offers significant performance improvements
 
 ## Implementation Notes (2026-01-25)
 
-### Hybrid Implementation Approach
+### Pure Event-Driven Implementation
 
-The implementation was done as a **hybrid approach** to maintain full backward compatibility:
+The implementation uses a **pure event-driven approach** without legacy fallback code:
 
-1. **Event Queue System**: Added alongside the existing periodic timer system
-2. **Zero-Crossing ISR**: Now calculates and schedules events while also setting legacy `zeroCross[i]` flags
-3. **Timer ISR**: Processes events from queue first, then runs legacy code as fallback
-4. **Toggle Mode**: Continues to work as before, updating `dimPulseBegin[]` which gets picked up by next zero-crossing
+1. **Event Queue System**: All triac firing is handled through the event queue
+2. **Zero-Crossing ISR**: Calculates exact firing times and schedules EVENT_FIRE_TRIAC events
+3. **Timer ISR**: Processes events from queue at precise timestamps - no legacy polling code
+4. **Toggle Mode**: Not implemented in this version (planned for 1.1.0 - see FUTURE_ENHANCEMENTS.md)
 
-### Benefits of Hybrid Approach
+### Benefits of Pure Event-Driven Approach
 
-- **Zero Breaking Changes**: All existing code continues to work
-- **Gradual Optimization**: Event queue handles most work, legacy code provides safety net
-- **Easy Testing**: Can validate event queue behavior against legacy implementation
-- **Future Migration**: Legacy code can be removed once event queue is proven stable
+- **Clean Architecture**: Single path for triac control, easier to understand and maintain
+- **Precise Timing**: Events fire at exact calculated times, not waiting for next timer tick
+- **No Redundancy**: Event queue is the sole mechanism, no duplicate logic
+- **Foundation for Optimization**: Ready for one-shot timer mode in future releases
 
-### Performance Improvement Analysis
+### Performance Characteristics
 
-While the hybrid approach still runs the periodic timer, the event queue system provides:
+The pure event-driven implementation provides:
 
-1. **Precise Timing**: Events fire at exact calculated times, not waiting for next timer tick
-2. **Reduced Logic**: Most dimmer firing handled by event queue, reducing checks in timer ISR
-3. **Scalability**: Adding dimmers doesn't increase timer ISR complexity
-4. **Foundation**: Infrastructure ready for full migration to one-shot timers in future
+1. **Precise Timing**: Events fire at exact calculated times with microsecond accuracy
+2. **Minimal ISR Logic**: Timer ISR only processes scheduled events, no polling or checking
+3. **Scalability**: Adding dimmers increases event count but not ISR complexity
+4. **Foundation**: Clean architecture ready for one-shot timer mode optimization
+
+### Implementation Status (2026-01-25 Update)
+
+**Completed:**
+1. ✅ Event queue infrastructure implemented
+2. ✅ Zero-crossing ISR calculates and schedules events
+3. ✅ Timer ISR processes events at precise timestamps
+4. ✅ Legacy code removed - pure event-driven architecture
+
+**Not Yet Implemented (Future Releases):**
+1. ❌ Toggle mode (planned for release 1.1.0 - see FUTURE_ENHANCEMENTS.md)
+2. ❌ One-shot timer mode (planned for release 2.0.0)
+3. ❌ Priority queue optimization (planned for release 2.0.0)
 
 ### Next Steps for Full Optimization
 
 To achieve the full 98% reduction in ISR invocations described in this document:
 
-1. Remove legacy code from timer ISR
-2. Switch timer to one-shot mode
-3. Dynamically schedule next timer alarm based on next event in queue
-4. Handle toggle mode via separate FreeRTOS task updating `dimPulseBegin[]`
+1. ~~Remove legacy code from timer ISR~~ ✅ DONE
+2. Switch timer to one-shot mode (Release 2.0.0)
+3. Dynamically schedule next timer alarm based on next event in queue (Release 2.0.0)
+4. Implement toggle mode via separate FreeRTOS task (Release 1.1.0)
 
-Current implementation provides the event queue infrastructure needed for these future optimizations.
+Current implementation provides a clean, pure event-driven architecture with the infrastructure needed for future optimizations.

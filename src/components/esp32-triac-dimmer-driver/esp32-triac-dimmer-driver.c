@@ -10,8 +10,6 @@ char user_zero_cross = '0';
 int debug_signal_zc = 0;
 bool flagDebug = false;
 
-static int toggleCounter = 0;
-static int toggleReload = 25;
 volatile bool _initDone = false;
 volatile int _steps = 0;
 
@@ -20,10 +18,8 @@ volatile bool firstSetup = false;
 volatile uint16_t dimPower[ALL_DIMMERS];
 volatile gpio_num_t dimOutPin[ALL_DIMMERS];
 volatile gpio_num_t dimZCPin[ALL_DIMMERS];
-volatile uint16_t zeroCross[ALL_DIMMERS];
 volatile DIMMER_MODE_typedef dimMode[ALL_DIMMERS];
 volatile ON_OFF_typedef dimState[ALL_DIMMERS];
-volatile uint16_t dimCounter[ALL_DIMMERS];
 static uint16_t dimPulseBegin[ALL_DIMMERS];
 volatile uint16_t togMax[ALL_DIMMERS];
 volatile uint16_t togMin[ALL_DIMMERS];
@@ -57,8 +53,6 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 	dimPulseBegin[current_dim - 1] = 1;
 	dimOutPin[current_dim - 1] = user_dimmer_pin;
 	dimZCPin[current_dim - 1] = zc_dimmer_pin;
-	dimCounter[current_dim - 1] = 0;
-	zeroCross[current_dim - 1] = 0;
 	dimMode[current_dim - 1] = NORMAL_MODE;
 	togMin[current_dim - 1] = 0;
 	togMax[current_dim - 1] = 1;
@@ -371,6 +365,13 @@ void setMode(dimmertyp *ptr, DIMMER_MODE_typedef DIMMER_MODE)
 
 void toggleSettings(dimmertyp *ptr, int minValue, int maxValue)
 {
+	// TODO: Toggle mode not yet implemented in event-driven architecture
+	// This will be implemented before release 1.1.0
+	// See FUTURE_ENHANCEMENTS.md for implementation plan
+	ESP_LOGW(TAG, "toggleSettings called but TOGGLE_MODE is not yet implemented in this version");
+	ESP_LOGW(TAG, "Toggle mode will be available in release 1.1.0");
+	
+	// Store the settings for future use, but mode won't function yet
 	if (maxValue > 99)
 	{
 		maxValue = 99;
@@ -379,11 +380,8 @@ void toggleSettings(dimmertyp *ptr, int minValue, int maxValue)
 	{
 		minValue = 1;
 	}
-	dimMode[ptr->current_num] = TOGGLE_MODE;
 	togMin[ptr->current_num] = powerBuf[maxValue];
 	togMax[ptr->current_num] = powerBuf[minValue];
-
-	toggleReload = 50;
 }
 
 static void IRAM_ATTR isr_ext(void *arg)
@@ -409,14 +407,10 @@ static void IRAM_ATTR isr_ext(void *arg)
 			
 			// Schedule the fire event
 			schedule_timer_event(fire_time, i, EVENT_FIRE_TRIAC);
-			
-			// Also set legacy zeroCross flag for compatibility
-			zeroCross[i] = 1;
 		}
 	}
 }
 
-static int k;
 #if DEBUG_ISR_TIMER == ISR_DEBUG_ON
 static int counter = 0;
 #endif
@@ -465,13 +459,11 @@ static void IRAM_ATTR onTimerISR(void *para)
 				uint64_t pulse_end_time = event->timestamp + pulse_width_ticks;
 				bool scheduled = schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
 				
-				// If scheduling failed, turn off triac immediately and reset flags
+				// If scheduling failed, turn off triac immediately
 				// to prevent it staying on
 				if (!scheduled)
 				{
 					gpio_set_level(dimOutPin[event->dimmer_id], 0);
-					zeroCross[event->dimmer_id] = 0;
-					dimCounter[event->dimmer_id] = 0;
 					ESP_LOGE(TAG, "Failed to schedule pulse end for dimmer %d", event->dimmer_id);
 				}
 			}
@@ -479,8 +471,6 @@ static void IRAM_ATTR onTimerISR(void *para)
 			{
 				// Turn off triac gate
 				gpio_set_level(dimOutPin[event->dimmer_id], 0);
-				zeroCross[event->dimmer_id] = 0;
-				dimCounter[event->dimmer_id] = 0;
 			}
 		}
 		else
@@ -491,67 +481,4 @@ static void IRAM_ATTR onTimerISR(void *para)
 		// Remove processed event
 		remove_event(i);
 	}
-
-	// Legacy code for backward compatibility and toggle mode
-	toggleCounter++;
-	for (k = 0; k < current_dim; k++)
-	{
-		if (zeroCross[k] == 1)
-		{
-			dimCounter[k]++;
-
-			if (dimMode[k] == TOGGLE_MODE)
-			{
-				/*****
-				 * TOGGLE DIMMING MODE
-				 *****/
-				if (dimPulseBegin[k] >= togMax[k])
-				{
-					// if reach max dimming value
-					togDir[k] = false; // downcount
-				}
-				if (dimPulseBegin[k] <= togMin[k])
-				{
-					// if reach min dimming value
-					togDir[k] = true; // upcount
-				}
-				if (toggleCounter == toggleReload)
-				{
-					if (togDir[k] == true)
-						dimPulseBegin[k]++;
-					else
-						dimPulseBegin[k]--;
-				}
-			}
-
-			// The event queue handles firing, but we keep this for any edge cases
-			// where events weren't scheduled (shouldn't happen in normal operation)
-			/*****
-			 * DEFAULT DIMMING MODE (NOT TOGGLE)
-			 *****/
-			if (dimCounter[k] >= dimPulseBegin[k])
-			{
-				// Event queue should have already fired, but check anyway
-				// This is a safety fallback
-				if (gpio_get_level(dimOutPin[k]) == 0)
-				{
-					gpio_set_level(dimOutPin[k], 1);
-				}
-			}
-
-			if (dimCounter[k] >= (dimPulseBegin[k] + pulseWidth))
-			{
-				// Event queue should have already turned off, but check anyway
-				// This is a safety fallback
-				if (gpio_get_level(dimOutPin[k]) == 1)
-				{
-					gpio_set_level(dimOutPin[k], 0);
-				}
-				zeroCross[k] = 0;
-				dimCounter[k] = 0;
-			}
-		}
-	}
-	if (toggleCounter >= toggleReload)
-		toggleCounter = 1;
 }

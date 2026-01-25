@@ -4,6 +4,8 @@
 
 The single-fire timer implementation for triac control has been successfully completed and is ready for hardware testing.
 
+**Important Note:** Toggle mode is not implemented in this release. The API exists but will return a warning. Toggle mode will be implemented in release 1.1.0 (see FUTURE_ENHANCEMENTS.md for details).
+
 ## What Was Implemented
 
 ### Core Features
@@ -21,20 +23,19 @@ The single-fire timer implementation for triac control has been successfully com
 3. **Zero-Crossing ISR Enhancement**
    - Calculates exact firing time for each enabled dimmer
    - Schedules EVENT_FIRE_TRIAC events
-   - Maintains backward compatibility with legacy zeroCross flags
+   - Pure event-driven, no legacy flags
 
 4. **Timer ISR Optimization**
    - Processes events from queue at correct timestamps
    - Fires triac (GPIO high)
    - Schedules pulse end event
    - Turns off pulse (GPIO low)
-   - Early termination after processing all active events
+   - Pure event-driven, no legacy code
 
-5. **Backward Compatibility**
-   - Hybrid approach: event queue + legacy code
+5. **API Preservation**
    - All existing APIs unchanged
-   - Toggle mode continues to work
-   - No breaking changes
+   - Toggle mode API exists but logs warning (not functional yet)
+   - No breaking changes for normal dimming operations
 
 ## Code Quality Measures
 
@@ -115,11 +116,8 @@ The single-fire timer implementation for triac control has been successfully com
    ↓
 7. For each EVENT_END_PULSE:
    - Set GPIO low (turn off pulse)
-   - Reset state flags
    ↓
-8. Legacy code runs as fallback/safety net
-   ↓
-9. Repeat from step 1 at next zero crossing
+8. Repeat from step 1 at next zero crossing
 ```
 
 ### Key Formula
@@ -149,12 +147,6 @@ Before merging, test on actual ESP32 hardware:
 - [ ] Three dimmers at different power levels
 - [ ] No interference between dimmers
 - [ ] All dimmers can fire simultaneously
-
-### Toggle Mode
-- [ ] Toggle mode starts correctly
-- [ ] Smooth ramping up from min to max
-- [ ] Smooth ramping down from max to min
-- [ ] Toggle speed matches configuration
 
 ### Edge Cases
 - [ ] Power level 0 turns dimmer completely off
@@ -193,20 +185,20 @@ Before merging, test on actual ESP32 hardware:
 
 ## Future Optimization Path
 
-The current implementation is a hybrid approach. For maximum efficiency:
+The current implementation is a pure event-driven approach. For maximum efficiency, see FUTURE_ENHANCEMENTS.md:
 
-**Phase 2: One-Shot Timer Mode**
+**Phase 1: Toggle Mode (Release 1.1.0)**
+- Implement toggle mode using FreeRTOS task
+- Required for backward compatibility
+
+**Phase 2: One-Shot Timer Mode (Release 2.0.0)**
 - Switch from periodic to one-shot timer
 - Dynamically schedule next alarm based on next event
 - Achieve 94-98% reduction in ISR invocations
 
-**Phase 3: Priority Queue**
+**Phase 3: Priority Queue (Release 2.0.0)**
 - Replace linear search with min-heap
 - O(log n) event insertion and retrieval
-
-**Phase 4: Toggle Task**
-- Move toggle mode to FreeRTOS task
-- Remove from ISR completely
 
 ## Migration Notes
 

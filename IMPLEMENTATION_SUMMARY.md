@@ -85,8 +85,6 @@ Get current timer count
 Process events with timestamp <= current_time:
     - EVENT_FIRE_TRIAC → Fire GPIO, schedule EVENT_END_PULSE
     - EVENT_END_PULSE → Turn off GPIO
-        ↓
-Legacy code runs (for backward compatibility)
 ```
 
 ### Data Structures
@@ -124,7 +122,7 @@ The system now knows exactly when each triac needs to fire:
 - Timer ISR: "Let me check all dimmers every 100μs..."
 
 **After:**
-- Timer ISR: "Process all events due now, then fallback to legacy code"
+- Timer ISR: "Process all events due now"
 
 ### 3. Scalability
 
@@ -148,13 +146,13 @@ All existing functionality is preserved:
 
 ## Performance Analysis
 
-### Current Implementation (Hybrid)
+### Current Implementation (Pure Event-Driven)
 
 **Timer ISR Frequency:** Still 10,000/sec (100 interrupts × 100 Hz)
 
 **Event Processing:** 200-600 events/sec depending on number of dimmers
 
-**Key Improvement:** Events fire at exact times rather than waiting for next tick
+**Key Improvement:** Events fire at exact times rather than waiting for next tick. No legacy fallback code - pure event-driven architecture.
 
 ### Future Optimization Potential
 
@@ -180,17 +178,12 @@ Since ESP-IDF build environment is not available, the following tests should be 
    - Verify no interference
    - Check for event queue overflow
 
-3. **Toggle Mode Test**
-   - Enable toggle mode
-   - Verify smooth ramping up and down
-   - Check that new events are scheduled correctly
-
-4. **Rapid Power Changes**
+3. **Rapid Power Changes**
    - Quickly change power levels
    - Verify events are scheduled correctly
    - Check for race conditions
 
-5. **Edge Cases**
+4. **Edge Cases**
    - Power level 0 (OFF)
    - Power level 99 (MAX)
    - Rapid on/off switching
@@ -205,23 +198,25 @@ Since ESP-IDF build environment is not available, the following tests should be 
 
 ## Known Limitations
 
-### 1. Hybrid Approach
+### 1. Event Queue Search
 
-Currently runs both event queue and legacy code. This provides safety but doesn't achieve full optimization potential.
+Using linear search O(n) for event processing. Acceptable for small queue sizes (typically < 10 active events) but could be optimized with priority queue for larger systems.
 
-### 2. Event Queue Search
-
-Using linear search O(n) for finding next event. Acceptable for small queue but could be optimized with priority queue for larger systems.
-
-### 3. Timer Still Periodic
+### 2. Timer Still Periodic
 
 Timer still runs at 100μs intervals. Full optimization would require one-shot timer mode.
 
-### 4. Toggle Mode in ISR
+### 3. Toggle Mode Not Implemented
 
-Toggle mode still updates `dimPulseBegin[]` in timer ISR. Better approach would be separate FreeRTOS task.
+Toggle mode API exists but is not functional in this release. Will be implemented before release 1.1.0. See FUTURE_ENHANCEMENTS.md for implementation plan.
 
 ## Future Enhancements
+
+See FUTURE_ENHANCEMENTS.md for detailed implementation plans.
+
+### Phase 1: Toggle Mode (Release 1.1.0)
+
+Implement toggle mode using a FreeRTOS task or timer callback to update dimPulseBegin[] values periodically.
 
 ### Phase 2: One-Shot Timer Mode
 
@@ -244,11 +239,7 @@ if (event_queue_size > 0) {
 
 ### Phase 3: Priority Queue
 
-Replace linear search with min-heap for O(log n) event scheduling.
-
-### Phase 4: Toggle Task
-
-Move toggle mode logic to FreeRTOS task running at lower priority.
+Replace linear search with min-heap for O(log n) event scheduling. See FUTURE_ENHANCEMENTS.md.
 
 ## API Compatibility Matrix
 
@@ -298,13 +289,15 @@ This implementation successfully addresses the problem statement:
 ✅ **"Based upon the delta between end of zero crossing and calculated engagement"**
 - Formula: `fire_time = zc_time + (dimPulseBegin × interval)`
 
-The hybrid approach ensures zero breaking changes while providing infrastructure for future optimization. The event-driven architecture is more efficient, more precise, and more scalable than the original implementation.
+The pure event-driven implementation provides a clean, efficient architecture with precise timing control. No legacy fallback code - all triac control is handled through the event queue system.
+
+**Note:** Toggle mode is not implemented in this release. It will be added in release 1.1.0 (see FUTURE_ENHANCEMENTS.md).
 
 ---
 
 **Implementation Date:** 2026-01-25  
 **Files Modified:** 2 (esp32-triac-dimmer-driver.h, esp32-triac-dimmer-driver.c)  
-**Lines Added:** ~173  
-**Lines Removed:** ~3  
-**Breaking Changes:** None  
+**Lines Added:** ~150  
+**Lines Removed:** ~70  
+**Breaking Changes:** None (Toggle mode API preserved but not functional)  
 **API Version:** Backward compatible
