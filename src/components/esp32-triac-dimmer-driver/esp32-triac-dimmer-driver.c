@@ -36,6 +36,12 @@ typedef struct {
     uint64_t event_count;
 } example_queue_element_t;
 
+/* Event queue for single-fire timer implementation */
+static timer_event_t event_queue[MAX_TIMER_EVENTS];
+static volatile int event_queue_size = 0;
+static uint64_t alarm_interval_ticks = 100;  // Will be calculated based on AC frequency
+static volatile bool timer_event_pending = false;
+
 
 dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 {
@@ -60,6 +66,83 @@ dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
 	return dimmer[current_dim - 1];
 }
 
+/**
+ * @brief Initialize the event queue
+ */
+static void init_event_queue(void)
+{
+	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
+	{
+		event_queue[i].active = false;
+		event_queue[i].timestamp = 0;
+		event_queue[i].dimmer_id = 0;
+		event_queue[i].event_type = EVENT_FIRE_TRIAC;
+	}
+	event_queue_size = 0;
+}
+
+/**
+ * @brief Find the next event in queue (earliest timestamp)
+ * @return Index of next event, or -1 if queue is empty
+ */
+static int find_next_event_index(void)
+{
+	int next_idx = -1;
+	uint64_t earliest_time = UINT64_MAX;
+	
+	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
+	{
+		if (event_queue[i].active && event_queue[i].timestamp < earliest_time)
+		{
+			earliest_time = event_queue[i].timestamp;
+			next_idx = i;
+		}
+	}
+	
+	return next_idx;
+}
+
+/**
+ * @brief Schedule a timer event
+ * @param timestamp Absolute timestamp when event should occur
+ * @param dimmer_id Which dimmer this event affects
+ * @param event_type Type of event (fire or end pulse)
+ * @return true if event was scheduled, false if queue is full
+ */
+static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_event_type_t event_type)
+{
+	// Find an empty slot
+	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
+	{
+		if (!event_queue[i].active)
+		{
+			event_queue[i].timestamp = timestamp;
+			event_queue[i].dimmer_id = dimmer_id;
+			event_queue[i].event_type = event_type;
+			event_queue[i].active = true;
+			event_queue_size++;
+			return true;
+		}
+	}
+	
+	// Queue is full
+	ESP_LOGE(TAG, "Event queue full!");
+	return false;
+}
+
+/**
+ * @brief Remove an event from the queue
+ * @param index Index of event to remove
+ */
+static void remove_event(int index)
+{
+	if (index >= 0 && index < MAX_TIMER_EVENTS && event_queue[index].active)
+	{
+		event_queue[index].active = false;
+		event_queue_size--;
+	}
+}
+
 #define TIMER_BASE_CLK 1 * 1000 * 1000,              // 1MHz, 1 tick = 1us
 
 /**
@@ -70,12 +153,16 @@ void config_alarm(gptimer_handle_t *timer, int ACfreq)
     /*self regulation 50/60 Hz*/
 	double m_calculated_interval = (1 / (double)(ACfreq * 2)) / 100;
     ESP_LOGI(TAG, "Interval between wave calculated for frequency : %3dHz = %5f", ACfreq, m_calculated_interval);
+	
+	// Store the interval in ticks for use in event scheduling
+	alarm_interval_ticks = (uint64_t)(1000000 * m_calculated_interval);
+	ESP_LOGI(TAG, "Timer interval in ticks: %llu", alarm_interval_ticks);
 
     ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
     ESP_LOGI(TAG, "Timer configuration - configure alarm");
     gptimer_alarm_config_t alarm_config = {
     .reload_count = 0, // counter will reload with 0 on alarm event
-    .alarm_count = (1000000 * m_calculated_interval),
+    .alarm_count = alarm_interval_ticks,
     .flags.auto_reload_on_alarm = true, // enable auto-reload
     };
     ESP_LOGI(TAG, "Timer configuration - set alarm action");
@@ -101,6 +188,10 @@ void config_timer(int ACfreq)
 	}
 
 	memset(&m_timer_config, 0, sizeof(m_timer_config));
+	
+	/* Initialize event queue */
+	init_event_queue();
+	ESP_LOGI(TAG, "Event queue initialized");
 
 	/* Prepare configuration */
     gptimer_config_t m_timer_config = {
@@ -306,11 +397,26 @@ static void IRAM_ATTR isr_ext(void *arg)
 	xQueueSendFromISR(gpio_zero_cross_evt_queue, &gpio_num, NULL);
 #endif
 
+	// Get current timer count
+	uint64_t zc_time = 0;
+	gptimer_get_raw_count(gptimer, &zc_time);
+	
 	for (int i = 0; i < current_dim; i++)
+	{
 		if (dimState[i] == ON)
 		{
+			// Calculate the exact time to fire the triac
+			// fire_time = current_time + (dimPulseBegin[i] * interval_per_step)
+			uint64_t fire_delay = (uint64_t)dimPulseBegin[i] * alarm_interval_ticks;
+			uint64_t fire_time = zc_time + fire_delay;
+			
+			// Schedule the fire event
+			schedule_timer_event(fire_time, i, EVENT_FIRE_TRIAC);
+			
+			// Also set legacy zeroCross flag for compatibility
 			zeroCross[i] = 1;
 		}
+	}
 }
 
 static int k;
@@ -327,6 +433,41 @@ static void IRAM_ATTR onTimerISR(void *para)
 	xQueueSendFromISR(timer_event_queue, &info, NULL);
 #endif
 
+	// Get current timer count
+	uint64_t current_time = 0;
+	gptimer_get_raw_count(gptimer, &current_time);
+	
+	// Process all events that should fire at or before current time
+	int next_event_idx = find_next_event_index();
+	while (next_event_idx >= 0 && event_queue[next_event_idx].timestamp <= current_time)
+	{
+		timer_event_t *event = &event_queue[next_event_idx];
+		
+		if (event->event_type == EVENT_FIRE_TRIAC)
+		{
+			// Fire the triac
+			gpio_set_level(dimOutPin[event->dimmer_id], 1);
+			
+			// Schedule pulse end event
+			uint64_t pulse_end_time = current_time + ((uint64_t)pulseWidth * alarm_interval_ticks);
+			schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
+		}
+		else if (event->event_type == EVENT_END_PULSE)
+		{
+			// Turn off triac gate
+			gpio_set_level(dimOutPin[event->dimmer_id], 0);
+			zeroCross[event->dimmer_id] = 0;
+			dimCounter[event->dimmer_id] = 0;
+		}
+		
+		// Remove processed event
+		remove_event(next_event_idx);
+		
+		// Find next event
+		next_event_idx = find_next_event_index();
+	}
+
+	// Legacy code for backward compatibility and toggle mode
 	toggleCounter++;
 	for (k = 0; k < current_dim; k++)
 	{
@@ -358,17 +499,29 @@ static void IRAM_ATTR onTimerISR(void *para)
 				}
 			}
 
+			// The event queue handles firing, but we keep this for any edge cases
+			// where events weren't scheduled (shouldn't happen in normal operation)
 			/*****
 			 * DEFAULT DIMMING MODE (NOT TOGGLE)
 			 *****/
 			if (dimCounter[k] >= dimPulseBegin[k])
 			{
-				gpio_set_level(dimOutPin[k], 1);
+				// Event queue should have already fired, but check anyway
+				// This is a safety fallback
+				if (gpio_get_level(dimOutPin[k]) == 0)
+				{
+					gpio_set_level(dimOutPin[k], 1);
+				}
 			}
 
 			if (dimCounter[k] >= (dimPulseBegin[k] + pulseWidth))
 			{
-				gpio_set_level(dimOutPin[k], 0);
+				// Event queue should have already turned off, but check anyway
+				// This is a safety fallback
+				if (gpio_get_level(dimOutPin[k]) == 1)
+				{
+					gpio_set_level(dimOutPin[k], 0);
+				}
 				zeroCross[k] = 0;
 				dimCounter[k] = 0;
 			}
