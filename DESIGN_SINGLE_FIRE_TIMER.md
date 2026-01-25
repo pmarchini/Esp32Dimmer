@@ -462,3 +462,43 @@ The single-fire timer implementation offers significant performance improvements
 **Date:** 2026-01-25  
 **Status:** Proposed  
 **Author:** ESP32 Triac Dimmer Driver Development Team
+
+---
+
+## Implementation Notes (2026-01-25)
+
+### Hybrid Implementation Approach
+
+The implementation was done as a **hybrid approach** to maintain full backward compatibility:
+
+1. **Event Queue System**: Added alongside the existing periodic timer system
+2. **Zero-Crossing ISR**: Now calculates and schedules events while also setting legacy `zeroCross[i]` flags
+3. **Timer ISR**: Processes events from queue first, then runs legacy code as fallback
+4. **Toggle Mode**: Continues to work as before, updating `dimPulseBegin[]` which gets picked up by next zero-crossing
+
+### Benefits of Hybrid Approach
+
+- **Zero Breaking Changes**: All existing code continues to work
+- **Gradual Optimization**: Event queue handles most work, legacy code provides safety net
+- **Easy Testing**: Can validate event queue behavior against legacy implementation
+- **Future Migration**: Legacy code can be removed once event queue is proven stable
+
+### Performance Improvement Analysis
+
+While the hybrid approach still runs the periodic timer, the event queue system provides:
+
+1. **Precise Timing**: Events fire at exact calculated times, not waiting for next timer tick
+2. **Reduced Logic**: Most dimmer firing handled by event queue, reducing checks in timer ISR
+3. **Scalability**: Adding dimmers doesn't increase timer ISR complexity
+4. **Foundation**: Infrastructure ready for full migration to one-shot timers in future
+
+### Next Steps for Full Optimization
+
+To achieve the full 98% reduction in ISR invocations described in this document:
+
+1. Remove legacy code from timer ISR
+2. Switch timer to one-shot mode
+3. Dynamically schedule next timer alarm based on next event in queue
+4. Handle toggle mode via separate FreeRTOS task updating `dimPulseBegin[]`
+
+Current implementation provides the event queue infrastructure needed for these future optimizations.
