@@ -499,19 +499,20 @@ The pure event-driven implementation provides:
 2. ✅ Zero-crossing ISR calculates and schedules events
 3. ✅ Timer ISR processes events at precise timestamps
 4. ✅ Legacy code removed - pure event-driven architecture
+5. ✅ One-shot timer mode implemented - dynamic alarm setting
+6. ✅ 94-98% reduction in timer ISR invocations achieved
 
 **Not Yet Implemented (Future Releases):**
 1. ❌ Toggle mode (planned for release 1.1.0 - see FUTURE_ENHANCEMENTS.md)
-2. ❌ One-shot timer mode (planned for release 2.0.0)
-3. ❌ Priority queue optimization (planned for release 2.0.0)
+2. ❌ Priority queue optimization (optional future enhancement)
 
-### Next Steps for Full Optimization
+### Implementation Complete
 
-To achieve the full 98% reduction in ISR invocations described in this document:
+All core optimizations have been achieved:
 
 1. ~~Remove legacy code from timer ISR~~ ✅ DONE
-2. Switch timer to one-shot mode (Release 2.0.0)
-3. Dynamically schedule next timer alarm based on next event in queue (Release 2.0.0)
-4. Implement toggle mode via separate FreeRTOS task (Release 1.1.0)
+2. ~~Switch timer to one-shot mode~~ ✅ DONE
+3. ~~Dynamically schedule next timer alarm based on next event in queue~~ ✅ DONE
+4. Implement toggle mode via separate FreeRTOS task ➡️ Release 1.1.0
 
-Current implementation provides a clean, pure event-driven architecture with the infrastructure needed for future optimizations.
+The implementation now achieves the full 94-98% reduction in ISR invocations by using one-shot timer mode with dynamic alarm scheduling.

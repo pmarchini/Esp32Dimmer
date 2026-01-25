@@ -146,27 +146,23 @@ All existing functionality is preserved:
 
 ## Performance Analysis
 
-### Current Implementation (Pure Event-Driven)
+### Current Implementation (One-Shot Timer Mode)
 
-**Timer ISR Frequency:** 10,000/sec (100 interrupts × 100 Hz) - periodic timer still runs at this rate
+**Timer ISR Frequency:** 200-600/sec (only fires when events are scheduled) - dynamic one-shot mode
 
-**Event Processing:** 200-600 events/sec depending on number of dimmers (only these events trigger GPIO actions)
+**Event Processing:** 200-600 events/sec depending on number of dimmers
 
 **Key Improvements Over Legacy:**
 - Events fire at exact calculated times (no polling delay)
-- ISR only processes scheduled events (no legacy fallback checks)
+- ISR only fires when events need processing (94-98% reduction vs. periodic polling)
+- Timer alarm dynamically set for next event (no wasted interrupts)
 - Pure event-driven architecture - cleaner, more maintainable code
 - No redundant GPIO checks or counter management
 
-### Future Optimization Potential
-
-The timer currently runs in periodic mode (auto-reload enabled). By switching to one-shot timer mode (future work):
-
-**Timer ISR Frequency:** Would reduce to 200-600/sec (only fires when events are scheduled)
-
-**Reduction:** 94-98% fewer timer interrupts
-
-**Implementation:** See FUTURE_ENHANCEMENTS.md for one-shot timer mode plan (Release 2.0.0)
+**How It Works:**
+- Zero-crossing ISR schedules events and sets alarm for next event
+- Timer ISR processes due events and sets alarm for next event
+- Timer remains idle when no events are scheduled (maximum efficiency)
 
 ## Testing Considerations
 

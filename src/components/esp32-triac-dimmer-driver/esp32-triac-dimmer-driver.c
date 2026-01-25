@@ -76,6 +76,27 @@ static void init_event_queue(void)
 }
 
 /**
+ * @brief Find the next event in queue (earliest timestamp)
+ * @return Index of next event, or -1 if queue is empty
+ */
+static int find_next_event_index(void)
+{
+	int next_idx = -1;
+	uint64_t earliest_time = UINT64_MAX;
+	
+	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
+	{
+		if (event_queue[i].active && event_queue[i].timestamp < earliest_time)
+		{
+			earliest_time = event_queue[i].timestamp;
+			next_idx = i;
+		}
+	}
+	
+	return next_idx;
+}
+
+/**
  * @brief Schedule a timer event
  * @param timestamp Absolute timestamp when event should occur
  * @param dimmer_id Which dimmer this event affects
@@ -130,6 +151,37 @@ static void remove_event(int index)
 	}
 }
 
+/**
+ * @brief Set the alarm for the next event in the queue
+ * Called from ISR context to schedule the next timer interrupt
+ */
+static void IRAM_ATTR set_next_alarm(void)
+{
+	int next_idx = find_next_event_index();
+	
+	if (next_idx >= 0)
+	{
+		uint64_t current_time = 0;
+		gptimer_get_raw_count(gptimer, &current_time);
+		
+		uint64_t next_event_time = event_queue[next_idx].timestamp;
+		
+		// If the event is in the past or very soon, fire immediately
+		if (next_event_time <= current_time)
+		{
+			next_event_time = current_time + 1;  // Fire on next tick
+		}
+		
+		// Set one-shot alarm for the next event
+		gptimer_alarm_config_t alarm_config = {
+			.alarm_count = next_event_time,
+			.flags.auto_reload_on_alarm = false  // One-shot mode
+		};
+		gptimer_set_alarm_action(gptimer, &alarm_config);
+	}
+	// If no events, timer will remain idle until next zero-crossing
+}
+
 #define TIMER_BASE_CLK 1 * 1000 * 1000,              // 1MHz, 1 tick = 1us
 
 /**
@@ -151,10 +203,12 @@ void config_alarm(gptimer_handle_t *timer, int ACfreq)
 
     ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
     ESP_LOGI(TAG, "Timer configuration - configure alarm");
+    // Initial alarm config - will be set dynamically by set_next_alarm()
+    // Starting with a large value so timer doesn't fire until first event is scheduled
     gptimer_alarm_config_t alarm_config = {
-    .reload_count = 0, // counter will reload with 0 on alarm event
-    .alarm_count = alarm_interval_ticks,
-    .flags.auto_reload_on_alarm = true, // enable auto-reload
+    .reload_count = 0,
+    .alarm_count = UINT64_MAX,  // Will be updated when first event is scheduled
+    .flags.auto_reload_on_alarm = false, // One-shot mode - alarm set dynamically per event
     };
     ESP_LOGI(TAG, "Timer configuration - set alarm action");
     ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config));
@@ -409,6 +463,9 @@ static void IRAM_ATTR isr_ext(void *arg)
 			schedule_timer_event(fire_time, i, EVENT_FIRE_TRIAC);
 		}
 	}
+	
+	// Set alarm for the next scheduled event
+	set_next_alarm();
 }
 
 #if DEBUG_ISR_TIMER == ISR_DEBUG_ON
@@ -481,4 +538,7 @@ static void IRAM_ATTR onTimerISR(void *para)
 		// Remove processed event
 		remove_event(i);
 	}
+	
+	// Set alarm for the next scheduled event
+	set_next_alarm();
 }
