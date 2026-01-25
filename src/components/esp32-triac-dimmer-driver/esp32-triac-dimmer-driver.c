@@ -40,6 +40,7 @@ typedef struct {
 static timer_event_t event_queue[MAX_TIMER_EVENTS];
 static volatile int event_queue_size = 0;
 static uint64_t alarm_interval_ticks = 100;  // Will be calculated based on AC frequency
+static uint64_t pulse_width_ticks = 200;     // Pre-calculated pulse width in ticks
 
 
 dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
@@ -117,6 +118,13 @@ static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_ev
 		return false;
 	}
 	
+	// Validate event_type
+	if (event_type != EVENT_FIRE_TRIAC && event_type != EVENT_END_PULSE)
+	{
+		ESP_LOGE(TAG, "Invalid event_type: %d", event_type);
+		return false;
+	}
+	
 	// Find an empty slot
 	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
 	{
@@ -163,6 +171,10 @@ void config_alarm(gptimer_handle_t *timer, int ACfreq)
 	// Store the interval in ticks for use in event scheduling
 	alarm_interval_ticks = (uint64_t)(1000000 * m_calculated_interval);
 	ESP_LOGI(TAG, "Timer interval in ticks: %llu", alarm_interval_ticks);
+	
+	// Pre-calculate pulse width in ticks for ISR efficiency
+	pulse_width_ticks = (uint64_t)pulseWidth * alarm_interval_ticks;
+	ESP_LOGI(TAG, "Pulse width in ticks: %llu", pulse_width_ticks);
 
     ESP_LOGI(TAG, "Timer configuration - configure interrupt and timer");
     ESP_LOGI(TAG, "Timer configuration - configure alarm");
@@ -445,11 +457,14 @@ static void IRAM_ATTR onTimerISR(void *para)
 	
 	// Process all events that should fire at or before current time
 	// Note: We scan through all events once to avoid O(n²) complexity
-	// This is acceptable since MAX_TIMER_EVENTS is small (100)
-	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
+	// Early termination when all active events have been checked
+	int processed_events = 0;
+	for (int i = 0; i < MAX_TIMER_EVENTS && processed_events < event_queue_size; i++)
 	{
 		if (!event_queue[i].active)
 			continue;
+		
+		processed_events++;  // Count this active event
 			
 		if (event_queue[i].timestamp > current_time)
 			continue;
@@ -464,8 +479,8 @@ static void IRAM_ATTR onTimerISR(void *para)
 				// Fire the triac
 				gpio_set_level(dimOutPin[event->dimmer_id], 1);
 				
-				// Schedule pulse end event
-				uint64_t pulse_end_time = current_time + ((uint64_t)pulseWidth * alarm_interval_ticks);
+				// Schedule pulse end event using pre-calculated pulse width
+				uint64_t pulse_end_time = current_time + pulse_width_ticks;
 				bool scheduled = schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
 				
 				// If scheduling failed, turn off triac immediately to prevent it staying on
