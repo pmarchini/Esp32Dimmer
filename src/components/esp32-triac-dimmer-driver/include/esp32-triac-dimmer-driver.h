@@ -15,6 +15,7 @@
 #include "esp_log.h"
 
 #define ALL_DIMMERS 50
+#define MAX_TIMER_EVENTS (ALL_DIMMERS * 2)  // Each dimmer can have fire + pulse_end events
 
 /*ISR debug defines*/
 #define ISR_DEBUG_ON 1
@@ -23,6 +24,22 @@
 #define DEBUG_ISR_DIMMER ISR_DEBUG_OFF
 /*If timer is too fast can lead to core 0 panic*/
 #define DEBUG_ISR_TIMER ISR_DEBUG_OFF
+
+/*Timer event types*/
+typedef enum
+{
+    EVENT_FIRE_TRIAC = 0,
+    EVENT_END_PULSE = 1
+} timer_event_type_t;
+
+/*Timer event structure*/
+typedef struct
+{
+    uint64_t timestamp;           // When this event should occur (in timer ticks)
+    uint8_t dimmer_id;            // Which dimmer this affects
+    timer_event_type_t event_type; // Type of event
+    bool active;                  // Whether this event slot is active
+} timer_event_t;
 
 
 
