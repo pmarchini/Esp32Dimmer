@@ -40,7 +40,6 @@ typedef struct {
 static timer_event_t event_queue[MAX_TIMER_EVENTS];
 static volatile int event_queue_size = 0;
 static uint64_t alarm_interval_ticks = 100;  // Will be calculated based on AC frequency
-static volatile bool timer_event_pending = false;
 
 
 dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
@@ -107,10 +106,17 @@ static int find_next_event_index(void)
  * @param timestamp Absolute timestamp when event should occur
  * @param dimmer_id Which dimmer this event affects
  * @param event_type Type of event (fire or end pulse)
- * @return true if event was scheduled, false if queue is full
+ * @return true if event was scheduled, false if queue is full or invalid input
  */
 static bool schedule_timer_event(uint64_t timestamp, uint8_t dimmer_id, timer_event_type_t event_type)
 {
+	// Validate dimmer_id to prevent array bounds violations
+	if (dimmer_id >= ALL_DIMMERS)
+	{
+		ESP_LOGE(TAG, "Invalid dimmer_id: %d (max: %d)", dimmer_id, ALL_DIMMERS - 1);
+		return false;
+	}
+	
 	// Find an empty slot
 	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
 	{
@@ -438,33 +444,52 @@ static void IRAM_ATTR onTimerISR(void *para)
 	gptimer_get_raw_count(gptimer, &current_time);
 	
 	// Process all events that should fire at or before current time
-	int next_event_idx = find_next_event_index();
-	while (next_event_idx >= 0 && event_queue[next_event_idx].timestamp <= current_time)
+	// Note: We scan through all events once to avoid O(n²) complexity
+	// This is acceptable since MAX_TIMER_EVENTS is small (100)
+	for (int i = 0; i < MAX_TIMER_EVENTS; i++)
 	{
-		timer_event_t *event = &event_queue[next_event_idx];
-		
-		if (event->event_type == EVENT_FIRE_TRIAC)
-		{
-			// Fire the triac
-			gpio_set_level(dimOutPin[event->dimmer_id], 1);
+		if (!event_queue[i].active)
+			continue;
 			
-			// Schedule pulse end event
-			uint64_t pulse_end_time = current_time + ((uint64_t)pulseWidth * alarm_interval_ticks);
-			schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
-		}
-		else if (event->event_type == EVENT_END_PULSE)
+		if (event_queue[i].timestamp > current_time)
+			continue;
+		
+		timer_event_t *event = &event_queue[i];
+		
+		// Validate dimmer_id to prevent array bounds violations
+		if (event->dimmer_id < ALL_DIMMERS)
 		{
-			// Turn off triac gate
-			gpio_set_level(dimOutPin[event->dimmer_id], 0);
-			zeroCross[event->dimmer_id] = 0;
-			dimCounter[event->dimmer_id] = 0;
+			if (event->event_type == EVENT_FIRE_TRIAC)
+			{
+				// Fire the triac
+				gpio_set_level(dimOutPin[event->dimmer_id], 1);
+				
+				// Schedule pulse end event
+				uint64_t pulse_end_time = current_time + ((uint64_t)pulseWidth * alarm_interval_ticks);
+				bool scheduled = schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
+				
+				// If scheduling failed, turn off triac immediately to prevent it staying on
+				if (!scheduled)
+				{
+					gpio_set_level(dimOutPin[event->dimmer_id], 0);
+					ESP_LOGE(TAG, "Failed to schedule pulse end for dimmer %d", event->dimmer_id);
+				}
+			}
+			else if (event->event_type == EVENT_END_PULSE)
+			{
+				// Turn off triac gate
+				gpio_set_level(dimOutPin[event->dimmer_id], 0);
+				zeroCross[event->dimmer_id] = 0;
+				dimCounter[event->dimmer_id] = 0;
+			}
+		}
+		else
+		{
+			ESP_LOGE(TAG, "Invalid dimmer_id in event: %d", event->dimmer_id);
 		}
 		
 		// Remove processed event
-		remove_event(next_event_idx);
-		
-		// Find next event
-		next_event_idx = find_next_event_index();
+		remove_event(i);
 	}
 
 	// Legacy code for backward compatibility and toggle mode
