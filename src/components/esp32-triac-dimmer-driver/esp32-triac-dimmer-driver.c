@@ -39,8 +39,8 @@ typedef struct {
 /* Event queue for single-fire timer implementation */
 static timer_event_t event_queue[MAX_TIMER_EVENTS];
 static volatile int event_queue_size = 0;
-static uint64_t alarm_interval_ticks = 100;  // Will be calculated based on AC frequency
-static uint64_t pulse_width_ticks = 200;     // Pre-calculated pulse width in ticks
+static uint64_t alarm_interval_ticks = 0;     // Calculated based on AC frequency (set by config_alarm)
+static uint64_t pulse_width_ticks = 0;        // Pre-calculated pulse width in ticks (set by config_alarm)
 
 
 dimmertyp *createDimmer(gpio_num_t user_dimmer_pin, gpio_num_t zc_dimmer_pin)
@@ -435,8 +435,10 @@ static void IRAM_ATTR onTimerISR(void *para)
 	gptimer_get_raw_count(gptimer, &current_time);
 	
 	// Process all events that should fire at or before current time
-	// Note: We scan through all events once to avoid O(n²) complexity
-	// Early termination when all active events have been checked
+	// Note: We scan through all active events once - O(n) where n = event_queue_size
+	// Early termination after processing all active events avoids scanning empty slots
+	// For small queue sizes (typically < 10 active events), this is more efficient
+	// than maintaining a separate active events list or priority queue
 	int processed_events = 0;
 	for (int i = 0; i < MAX_TIMER_EVENTS && processed_events < event_queue_size; i++)
 	{
@@ -463,10 +465,13 @@ static void IRAM_ATTR onTimerISR(void *para)
 				uint64_t pulse_end_time = event->timestamp + pulse_width_ticks;
 				bool scheduled = schedule_timer_event(pulse_end_time, event->dimmer_id, EVENT_END_PULSE);
 				
-				// If scheduling failed, turn off triac immediately to prevent it staying on
+				// If scheduling failed, turn off triac immediately and reset flags
+				// to prevent it staying on
 				if (!scheduled)
 				{
 					gpio_set_level(dimOutPin[event->dimmer_id], 0);
+					zeroCross[event->dimmer_id] = 0;
+					dimCounter[event->dimmer_id] = 0;
 					ESP_LOGE(TAG, "Failed to schedule pulse end for dimmer %d", event->dimmer_id);
 				}
 			}
