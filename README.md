@@ -76,6 +76,29 @@ To use the basic example, add the component to your project's components directo
 
 If you are using the library in a project that is not using ESP-IDF 5.x, you can still use the old version of the library (v1.0.0) which is compatible with ESP-IDF 4.x.
 
+## Testing
+
+This library includes comprehensive unit tests to ensure reliability and enable safe refactoring. The tests cover all public API functions including:
+
+- Dimmer creation and initialization
+- Power control with boundary conditions
+- State management (ON/OFF)
+- Mode management (NORMAL/TOGGLE)
+- Multiple independent dimmers
+
+### Running Tests
+
+To run the unit tests:
+
+```bash
+cd test_app
+idf.py set-target esp32
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+See [test_app/README.md](test_app/README.md) for detailed testing documentation.
+
 ## Contributing 
 
 We welcome contributions to this library. Please open a pull request or an issue to get started. 

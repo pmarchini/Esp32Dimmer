@@ -1,0 +1,14 @@
+# ESP32 Dimmer Test Configuration
+
+# Enable Unity test framework
+CONFIG_UNITY_ENABLE_FLOAT=y
+CONFIG_UNITY_ENABLE_DOUBLE=y
+
+# Increase main task stack size for tests
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Enable detailed logging for tests
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# FreeRTOS configuration
+CONFIG_FREERTOS_HZ=1000
